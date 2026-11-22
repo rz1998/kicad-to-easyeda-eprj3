@@ -156,6 +156,8 @@ function buildSymbolRecords(kicadSym, opts = {}) {
   const partId = opts.partId || ('pid' + randId());
   const records = [];
   let ticket = 1;
+  // ★★ 2026-11-22 PATCH: 库文档图元 id 用官方形式 'e<N>' (段内递增)
+  let elemSeq = 0;
 
   // KiCad lib is Y-up; eprj3 symbol records are Y-down → negate y.
   // Official PART BBOX stores the record-space extent as [minX, −minY, maxX, −maxY].
@@ -175,7 +177,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
     const ref = (kicadSym.properties && kicadSym.properties.Reference) || '?';
     const libAttr = (key, value) => {
       records.push({
-        head: { type: 'ATTR', ticket: ++ticket, id: 'e' + randId() },
+        head: { type: 'ATTR', ticket: ++ticket, id: 'e' + (++elemSeq) },
         body: {
           partId, groupId: '', locked: false, zIndex: ticket, parentId: '',
           key, value,
@@ -191,7 +193,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
     // Doc-level Device/Symbol attrs, as written by the official app exports.
     const docAttr = (key, value) => {
       records.push({
-        head: { type: 'ATTR', ticket: ++ticket, id: 'e' + randId() },
+        head: { type: 'ATTR', ticket: ++ticket, id: 'e' + (++elemSeq) },
         body: {
           partId, groupId: '', locked: false, zIndex: ticket, parentId: '',
           key, value,
@@ -221,7 +223,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
     };
     if (sh.type === 'RECT') {
       records.push({
-        head: { type: 'RECT', ticket, id: 'e' + randId() },
+        head: { type: 'RECT', ticket, id: 'e' + (++elemSeq) },
         body: {
           ...common,
           dotX1: schX(sh.x1), dotY1: schY(sh.y1),
@@ -231,7 +233,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
       });
     } else if (sh.type === 'POLY' && sh.pts) {
       records.push({
-        head: { type: 'POLY', ticket, id: 'e' + randId() },
+        head: { type: 'POLY', ticket, id: 'e' + (++elemSeq) },
         body: {
           ...common,
           points: sh.pts.map(p => ({ x: schX(p.x), y: schY(p.y) })),
@@ -240,7 +242,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
       });
     } else if (sh.type === 'CIRCLE' && sh.r != null) {
       records.push({
-        head: { type: 'CIRCLE', ticket, id: 'e' + randId() },
+        head: { type: 'CIRCLE', ticket, id: 'e' + (++elemSeq) },
         body: { ...common, centerX: schX(sh.cx), centerY: schY(sh.cy), radius: schX(sh.r) }
       });
     } else if (sh.type === 'ARC' && sh.mx != null) {
@@ -248,7 +250,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
       // Mirror the three points into record space, then recompute the center.
       const c = circumcenter(schX(sh.x1), schY(sh.y1), schX(sh.mx), schY(sh.my), schX(sh.x2), schY(sh.y2));
       records.push({
-        head: { type: 'ARC', ticket, id: 'e' + randId() },
+        head: { type: 'ARC', ticket, id: 'e' + (++elemSeq) },
         body: {
           ...common,
           startX: schX(sh.x1), startY: schY(sh.y1),
@@ -258,7 +260,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
       });
     } else if (sh.type === 'BEZIER' && sh.pts && sh.pts.length >= 4) {
       records.push({
-        head: { type: 'BEZIER', ticket, id: 'e' + randId() },
+        head: { type: 'BEZIER', ticket, id: 'e' + (++elemSeq) },
         body: { ...common, controls: sh.pts.flatMap(p => [schX(p.x), schY(p.y)]) }
       });
     }
@@ -306,7 +308,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
     const pinAttr = (key, value, o) => {
       ticket++;
       records.push({
-        head: { type: 'ATTR', ticket, id: 'e' + randId() },
+        head: { type: 'ATTR', ticket, id: 'e' + (++elemSeq) },
         body: {
           partId, groupId: '', locked: false, zIndex: ticket, parentId: pinId,
           key, value,
@@ -346,7 +348,7 @@ function buildSymbolRecords(kicadSym, opts = {}) {
       const attr = (key, vv) => {
         ticket++;
         records.push({
-          head: { type: 'ATTR', ticket, id: 'e' + randId() },
+          head: { type: 'ATTR', ticket, id: 'e' + (++elemSeq) },
           body: {
             partId, groupId: '', locked: false, zIndex: ticket, parentId: '',
             key, value: opts.netName,
@@ -412,11 +414,47 @@ function footprintPadRecord(pad, opts = {}) {
   };
 }
 
+// ★★ 2026-11-22 PATCH: 从 elibz2.js 复用官方 FOOTPRINT 层清单
+const FOOTPRINT_LAYERS = [
+  ['TOP', 'Top Layer', '#FF0000', '#7F0000'],
+  ['BOTTOM', 'Bottom Layer', '#0000FF', '#00007F'],
+  ['TOP_SILK', 'Top Silkscreen Layer', '#FFCC00', '#7F6600'],
+  ['BOT_SILK', 'Bottom Silkscreen Layer', '#66CC33', '#336619'],
+  ['TOP_PASTE_MASK', 'Top Paste Mask Layer', '#808080', '#404040'],
+  ['BOT_PASTE_MASK', 'Bottom Paste Mask Layer', '#800000', '#400000'],
+  ['TOP_SOLDER_MASK', 'Top Solder Mask Layer', '#800080', '#400040'],
+  ['BOT_SOLDER_MASK', 'Bottom Solder Mask Layer', '#AA00FF', '#55007F'],
+  ['DOCUMENT', 'Document Layer', '#FFFFFF', '#7F7F7F'],
+  ['OUTLINE', 'Board Outline Layer', '#FF00FF', '#7F007F'],
+  ['MULTI', 'Multi-Layer', '#C0C0C0', '#606060'],
+  ['TOP_ASSEMBLY', 'Top Assembly Layer', '#33CC99', '#19664C'],
+  ['BOT_ASSEMBLY', 'Bottom Assembly Layer', '#5555FF', '#2A2A7F'],
+  ['MECHANICAL', 'Mechanical Layer', '#F022F0', '#781178'],
+  ['COMPONENT_MODEL', 'Component Model Layer', '#FFFFFF', '#7F7F7F'],
+  ['COMPONENT_SHAPE', 'Component Shape Layer', '#00CCCC', '#006666'],
+  ['PIN_FLOATING', 'Pin Floating Layer', '#FF99FF', '#7F4C7F'],
+  ['COMPONENT_MARKING', 'Component Marking Layer', '#66FFCC', '#337F66'],
+  ['PIN_SOLDERING', 'Pin Soldering Layer', '#CC9999', '#664C4C']
+];
+
+const FOOTPRINT_CANVAS_BODY = {
+  originX: 0, originY: 0, unit: 'mm',
+  gridXSize: 10, gridYSize: 10, snapXSize: 0.5, snapYSize: 0.5,
+  gridType: 'NONE', multiGridType: 'NONE', highlightValue: 0.5,
+  layerBrightness: 'NORMAL'
+};
+
 function buildFootprintRecords(kicadFp, opts = {}) {
   const partId = 'pid' + randId();
   const records = [];
   const padIds = [];
   let ticket = 1;
+  // ★★ 2026-11-22 PATCH: 库文档图元 id 必须是官方形式 'e<N>' (段内递增)
+  //   官方 FOOTPRINT 段: PAD=e12,e13 / ATTR=e15,e16 / POLY=e3,e6...
+  //   官方 SYMBOL 段:   RECT=e0 / PIN=e1 / ATTR=e2,e3,e4
+  //   ⇒ PCB 段用 [compId + 库图元id] / [padId] 引用它们
+  //   随机 16 位 id ⇒ 立创EDA 读库文档时无法把图元归到元件 ⇒ 元件加载失败
+  let elemSeq = 0;
 
   // BBOX from pads and silk shapes (mil, Y-up)
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -448,12 +486,28 @@ function buildFootprintRecords(kicadFp, opts = {}) {
 
   records.push({
     head: { type: 'CANVAS', ticket: ++ticket, id: 'CANVAS' },
-    body: opts.canvasBody || { originX: 0, originY: 0 }
+    body: opts.canvasBody || FOOTPRINT_CANVAS_BODY
   });
   if (opts.includePart !== false) {
     records.push({
       head: { type: 'PART', ticket: ++ticket, id: partId },
       body: { BBOX: [minX, minY, maxX, maxY], title: '' }
+    });
+  }
+  // ★★ 2026-11-22 PATCH: FOOTPRINT 段必须带 LAYER 清单 + ACTIVE_LAYER
+  if (opts.withLayers !== false) {
+    for (const [layerType, layerName, activeColor, inactiveColor] of FOOTPRINT_LAYERS) {
+      ticket++;
+      records.push({
+        head: { type: 'LAYER', ticket, id: 'LAYER' },
+        body: { layerType, layerName, use: true, show: true, locked: false,
+                activeColor, activateTransparency: 1, inactiveColor, inactiveTransparency: 1 }
+      });
+    }
+    ticket++;
+    records.push({
+      head: { type: 'ACTIVE_LAYER', ticket, id: 'ACTIVE_LAYER' },
+      body: { layerId: 1 }
     });
   }
 
@@ -465,7 +519,7 @@ function buildFootprintRecords(kicadFp, opts = {}) {
     const width = Math.max(1, Math.round(kicadToEprj3(parseFloat(sh.width) || 0.15)));
     if (sh.kind === 'fp_line') {
       records.push({
-        head: { type: 'POLY', ticket, id: 'e' + randId() },
+        head: { type: 'POLY', ticket, id: 'e' + (++elemSeq) },
         body: {
           groupId: 0, netName: '', layerId, width,
           path: [kicadToEprj3(sh.x1), flipY(sh.y1), 'L', kicadToEprj3(sh.x2), flipY(sh.y2)],
@@ -475,7 +529,7 @@ function buildFootprintRecords(kicadFp, opts = {}) {
     } else if (sh.kind === 'fp_rect') {
       const x1 = kicadToEprj3(sh.x1), y1 = flipY(sh.y1), x2 = kicadToEprj3(sh.x2), y2 = flipY(sh.y2);
       records.push({
-        head: { type: 'POLY', ticket, id: 'e' + randId() },
+        head: { type: 'POLY', ticket, id: 'e' + (++elemSeq) },
         body: {
           groupId: 0, netName: '', layerId, width,
           path: [x1, y1, 'L', x2, y1, x2, y2, x1, y2, x1, y1],
@@ -486,7 +540,7 @@ function buildFootprintRecords(kicadFp, opts = {}) {
       const flat = [];
       for (const p of sh.pts) flat.push(kicadToEprj3(p.x), flipY(p.y));
       records.push({
-        head: { type: 'POLY', ticket, id: 'e' + randId() },
+        head: { type: 'POLY', ticket, id: 'e' + (++elemSeq) },
         body: {
           groupId: 0, netName: '', layerId, width,
           path: [...flat, flat[0], flat[1]],
@@ -495,7 +549,7 @@ function buildFootprintRecords(kicadFp, opts = {}) {
       });
     } else if (sh.kind === 'fp_circle' && sh.r != null) {
       records.push({
-        head: { type: 'POLY', ticket, id: 'e' + randId() },
+        head: { type: 'POLY', ticket, id: 'e' + (++elemSeq) },
         body: {
           groupId: 0, netName: '', layerId, width,
           path: [['CIRCLE', kicadToEprj3(sh.cx), flipY(sh.cy), kicadToEprj3(sh.r), 1]],
@@ -503,18 +557,27 @@ function buildFootprintRecords(kicadFp, opts = {}) {
         }
       });
     } else if (sh.kind === 'fp_arc' && sh.mx != null) {
-      // PCB ARC record: start/end + CCW-positive angle in eprj3 (Y-up) space.
+      // ★★ 2026-11-22 PATCH (U24 根因修复): FOOTPRINT 库文档里的【独立 ARC 记录】
+      //    会让立创EDA 客户端在解析该库文档时【整条拒收】⇒ 库文档解析中断
+      //    ⇒ 后续所有 COMPONENT 实例被丢弃（实测 177 元件只加载 96）。
+      //    官方规范虽然允许 FOOTPRINT 有 ARC 记录，但客户端解码路径不接受它。
+      //    ⇒ 改为写成 POLY 记录, path 里用官方支持的 "ARC" 指令
+      //       (TPcbSinglePolygon: `startX startY ARC angle endX endY`)
+      //    实测: 改写后立刻 177/177 元件全加载, pads=702, vias=376。
       const x1 = kicadToEprj3(sh.x1), y1 = flipY(sh.y1);
       const mx = kicadToEprj3(sh.mx), my = flipY(sh.my);
       const x2 = kicadToEprj3(sh.x2), y2 = flipY(sh.y2);
       const { sweep } = arcSweep(x1, y1, mx, my, x2, y2);
+      let angle = Math.round(sweep * 100) / 100;
+      // angle 不能为 0 / ±360 (官方 arcCheck() 会整条拒收)
+      if (angle === 0) angle = 0.01;
+      if (Math.abs(angle) === 360) angle = angle > 0 ? 359.99 : -359.99;
       records.push({
-        head: { type: 'ARC', ticket, id: 'e' + randId() },
+        head: { type: 'POLY', ticket, id: 'e' + (++elemSeq) },
         body: {
-          groupId: 0, netName: '', layerId,
-          startX: x1, startY: y1, endX: x2, endY: y2,
-          angle: Math.round(sweep * 100) / 100, width,
-          locked: false, zIndex: ticket
+          groupId: 0, netName: '', layerId, width,
+          path: [x1, y1, 'ARC', angle, x2, y2],
+          locked: false, zIndex: ticket, polyType: 'NORMAL'
         }
       });
     }
@@ -522,7 +585,8 @@ function buildFootprintRecords(kicadFp, opts = {}) {
 
   for (const pad of kicadFp.pads) {
     ticket++;
-    const padId = 'e' + randId();
+    // ★ 2026-11-22 PATCH: 库图元 id 用官方形式 'e<N>'
+    const padId = 'e' + (++elemSeq);
     padIds.push({ num: pad.number || '', id: padId });
     records.push(footprintPadRecord(pad, { ticket, id: padId, zIndex: ticket }));
   }
@@ -531,7 +595,7 @@ function buildFootprintRecords(kicadFp, opts = {}) {
   const fpAttr = (key, value) => {
     ticket++;
     records.push({
-      head: { type: 'ATTR', ticket, id: 'e' + randId() },
+      head: { type: 'ATTR', ticket, id: 'e' + (++elemSeq) },
       body: {
         groupId: 0, parentId: '', layerId: 3, x: null, y: null,
         key, value, keyVisible: false, valueVisible: false,

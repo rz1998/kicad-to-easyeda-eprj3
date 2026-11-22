@@ -120,7 +120,7 @@ function buildElibz2({ name, symbols = [], footprints = [] }) {
   for (const fp of footprints) {
     const docUuid = uuid(16);
     fpUuidByName[(fp.name || '').toLowerCase()] = docUuid;
-    const { records } = buildFootprintRecords(fp, { includePart: false, canvasBody: FOOTPRINT_CANVAS });
+    const { records } = buildFootprintRecords(fp, { includePart: false, canvasBody: FOOTPRINT_CANVAS, withLayers: false });
     elibu.push(
       docHead('FOOTPRINT', docUuid),
       metaRec(fp.name || ''),

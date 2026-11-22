@@ -86,6 +86,8 @@ function findChildValue(node, key) {
 }
 
 let ggeCounter = 0;
+// ★ 2026-11-22 PATCH: PCB 段元件内图元序号 (官方形式 <compId>e<N>)
+let pcbElemSeq = 0;
 let warnCounter = 0;
 function warn(msg) {
   if (++warnCounter <= 30) console.warn(`  warn: ${msg}`);
@@ -788,7 +790,10 @@ function convertPcb(srcFile, dst, pcb) {
     const devUuid = uuid(16);
     // Library docs carry no instance nets — nets are wired per placement via PAD_NET.
     const anonymized = { ...fpData, pads: fpData.pads.map(p => ({ ...p, netName: '' })) };
-    const { records: fpRecs, pads } = buildFootprintRecords({ name, pads: anonymized.pads, shapes: anonymized.shapes, value: fpData.value });
+    // ★★ 2026-11-22 PATCH: includePart:false —— 官方 FOOTPRINT 段【没有 PART 记录】
+    const { records: fpRecs, pads } = buildFootprintRecords(
+      { name, pads: anonymized.pads, shapes: anonymized.shapes, value: fpData.value },
+      { includePart: false });
     libDocs.push(docHead('FOOTPRINT', docUuid), metaRec(name), ...fpRecs);
     libDocs.push(docHead('DEVICE', devUuid), metaRec(name, { images: [], attributes: { Symbol: '', Footprint: docUuid } }));
     usedFps[name] = { docUuid, devUuid, pads };
@@ -853,7 +858,7 @@ function convertPcb(srcFile, dst, pcb) {
       push('ARC', {
         ...pcbLineCommon, netName, layerId,
         startX: x1, startY: y1, endX: x2, endY: y2,
-        angle: r2(sweep), width: toMil(width)
+        angle: normArcAngle(r2(sweep)), width: toMil(width), arcType: 'DOT'
       });
     } else if (head === 'via') {
       const at = findSub(node, 'at');
@@ -912,7 +917,7 @@ function convertPcb(srcFile, dst, pcb) {
           push('ARC', {
             ...pcbLineCommon, netName: '', layerId: layerToId(lname),
             startX: x1, startY: y1, endX: x2, endY: y2,
-            angle: r2(sweep), width: toMil(width)
+            angle: normArcAngle(r2(sweep)), width: toMil(width), arcType: 'DOT'
           });
         }
       } else if (head === 'gr_rect') {
@@ -1014,6 +1019,22 @@ function normNet(name) {
 }
 
 function r2(v) { return Math.round(v * 100) / 100; }
+
+// ★★ 2026-11-22 PATCH (U24 根因修复): ARC 的 angle 不能为 0 / ±360 ——
+//    官方规范 (primitives/FOOTPRINT/arc.md, primitives/PCB/arc.md) 明写:
+//    「解码的 arcCheck() 会据此整条拒收该 ARC (angle 为空、|角度| 为 360、或为 0 时校验不通过)」。
+//    客户端拒收 ARC ⇒ 该 FOOTPRINT 库文档解析中断 ⇒ 后续所有 COMPONENT 被丢弃。
+function normArcAngle(a) {
+  let v = a;
+  if (v === 0) return 0.01;
+  if (Math.abs(v) === 360) return v > 0 ? 359.99 : -359.99;
+  if (v > 360 || v < -360) {
+    while (v > 360) v -= 360;
+    while (v < -360) v += 360;
+    if (v === 0) v = 0.01;
+  }
+  return v;
+}
 
 function netOf(node, netNames) {
   const netArr = findSub(node, 'net');
@@ -1278,7 +1299,10 @@ function convertFootprint(node, ctx) {
 
 function pcbAttr(ticket, parentId, key, value, x, y, valueVisible, angle, zIndex) {
   return {
-    head: { type: 'ATTR', ticket, id: randId() },
+    // ★★ 2026-11-22 PATCH: PCB 段元件内图元 id 必须是官方形式 <COMPONENT.id>e<N>
+    //   官方 ATTR id / pinSwapInfo key / PAD_NET 第4段 都遵循这个「compId + 库图元id」约定
+    //   随机 id ⇒ 立创EDA 无法把 PCB 段的 ATTR/PAD_NET 归到元件上 ⇒ 元件加载失败
+    head: { type: 'ATTR', ticket, id: parentId + 'e' + (++pcbElemSeq) },
     body: {
       partitionId: '', groupID: 0, parentId, layerId: 3, x, y,
       key, value, keyVisible: false, valueVisible,
